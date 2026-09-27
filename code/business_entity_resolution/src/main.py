@@ -36,6 +36,11 @@ import random
 from collections import defaultdict
 from typing import Dict, List, Tuple, Optional, Any, Set
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
+
 # ---------------------------------------------------------------------------
 # Anchor every path to the repository root  (Amazon_ML_Challenge_submission/)
 # This is computed at import time from __file__, so it works correctly
@@ -241,7 +246,7 @@ def _partition_tsv(tsv_file: str, out_base: str, source_name: str, con) -> List[
             coalesce(trim(business_address), '')        as business_address,
             coalesce(trim(country), 'UNKNOWN')          as country
         FROM read_csv('{norm}', delim='\\t', header=True,
-                      quote='"', escape='\\\\', all_varchar=True, ignore_errors=True);
+                      quote='"', escape='\\', all_varchar=True, ignore_errors=True);
     """)
     raw_countries = [r[0] for r in con.execute(
         f"SELECT DISTINCT country FROM {vn} WHERE country IS NOT NULL"
@@ -261,6 +266,9 @@ def _partition_tsv(tsv_file: str, out_base: str, source_name: str, con) -> List[
 
 
 def _ingest(input_dir: str, proc_dir: str, is_train: bool, tmp_dir: str) -> None:
+    import shutil
+    shutil.rmtree(proc_dir, ignore_errors=True)
+    os.makedirs(proc_dir, exist_ok=True)
     prefix = "train" if is_train else "test"
     print(f"\n[Ingestion] Partitioning {prefix.upper()} data → {proc_dir}")
     con = _get_duckdb(temp_dir=tmp_dir)

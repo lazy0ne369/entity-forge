@@ -1,0 +1,42 @@
+# Junk / partial downloads
+*.crdownload
+
+# Data files — query form responses
+data/*.csv
+data/*.xlsx
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Data (large files — do NOT push competition dataset)
+data/*
+!data/.gitkeep
+
+# Output artifacts
+output/
+*.zip
+scratch/
+
+# DuckDB temp
+scratch/duckdb_temp/
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# Environment
+.env
+.venv/
+venv/
