@@ -109,4 +109,4 @@ The pipeline strictly complies with all official Amazon ML Challenge formatting 
 2. Exactly 1 row per test $S_1$ entity with tab separation.
 3. No self-matches (only `S2-` and `S3-` entity IDs).
 4. Matches $\subseteq$ Candidates: every ID in `matching_results.tsv` strictly originates from `candidate_pairs.tsv`.
-5. Submission package is built as a self-contained `<team_name>_submission.zip` containing `output/`, `code/entity_forge/`, and `Documentation_template.md`.
+5. Submission package is built as a self-contained `<team_name>_submission.zip` containing `output/`, `code/business_entity_resolution/`, and `Documentation_template.md`.

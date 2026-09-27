@@ -52,9 +52,10 @@ _PKG_DIR   = os.path.dirname(_SRC_DIR)          # .../business_entity_resolution
 _CODE_DIR  = os.path.dirname(_PKG_DIR)          # .../code/
 _ROOT_DIR  = os.path.dirname(_CODE_DIR)         # Amazon_ML_Challenge_submission/  ← root
 
-# Ensure the code/ package directory is importable
-if _CODE_DIR not in sys.path:
-    sys.path.insert(0, _CODE_DIR)
+# Ensure the root and code/ directories are importable
+for p in (_ROOT_DIR, _CODE_DIR):
+    if p not in sys.path:
+        sys.path.insert(0, p)
 
 
 # ---------------------------------------------------------------------------
@@ -735,13 +736,19 @@ def run_pipeline(
     test_dir:  str,
     output_dir: str,
     work_dir:   str,
-    threshold:  float,
+    threshold:  float = 0.85,
+    top_k:      int = 6,
+    min_sim:    float = 0.20,
+    max_train_entities: Optional[int] = 40000,
+    team_name:  Optional[str] = "GENZ_MINDS",
 ) -> bool:
     t0 = time.time()
     print("=" * 70)
     print("  AMAZON ML CHALLENGE 2026: BUSINESS ENTITY RESOLUTION")
     print(f"  output_dir : {output_dir}")
     print(f"  work_dir   : {work_dir}")
+    print(f"  top_k      : {top_k}")
+    print(f"  min_sim    : {min_sim}")
     print("=" * 70)
 
     # Paths — everything rooted in output_dir and work_dir (both under ROOT)
@@ -769,7 +776,7 @@ def run_pipeline(
     # ── Step 2: Train ─────────────────────────────────────────────────────────
     t2 = time.time()
     print("\n>>> STEP 2: Feature Extraction & LightGBM Training")
-    X, y   = _build_train_features(train_proc, gt_file, top_k=15, min_sim=0.10)
+    X, y   = _build_train_features(train_proc, gt_file, top_k=top_k, min_sim=min_sim, max_entities=max_train_entities)
     model  = _train_lgb(X, y, model_path=model_path)
     del X, y
     gc.collect()
@@ -778,7 +785,7 @@ def run_pipeline(
     # ── Step 3: Block (test) → output/candidate_pairs.tsv ────────────────────
     t3 = time.time()
     print("\n>>> STEP 3: Candidate Generation (Blocking)")
-    cand_map = _run_blocking(test_proc, cand_tsv, top_k=15, min_sim=0.10)
+    cand_map = _run_blocking(test_proc, cand_tsv, top_k=top_k, min_sim=min_sim)
     print(f">>> STEP 3 done in {time.time()-t3:.1f}s")
 
     # ── Step 4: Predict → output/matching_results.tsv ────────────────────────
@@ -806,6 +813,15 @@ def run_pipeline(
         print("[ERROR] Validation FAILED — see issues above.")
         return False
 
+    # ── Step 7: Packaging Final Submission Archive ───────────────────────────
+    if team_name:
+        print(f"\n>>> STEP 7: Packaging Final Submission Archive ({team_name}_submission.zip)")
+        try:
+            from utils.package_submission import package_submission
+            package_submission(team_name, _ROOT_DIR)
+        except Exception as e:
+            print(f"[WARN] Failed to package zip automatically: {e}")
+
     print(f"\n{'='*70}")
     print(f"  PIPELINE COMPLETE  ({time.time()-t0:.1f}s total)")
     print(f"  candidate_pairs.tsv  → {cand_tsv}")
@@ -826,13 +842,22 @@ def main() -> None:
     )
     ap.add_argument("--mode", choices=["sample", "full"], default="sample",
                     help="'sample' = dry-run on synthetic data; 'full' = competition dataset")
+    ap.add_argument("--team-name", type=str, default="GENZ_MINDS",
+                    help="Team name for packaging <team_name>_submission.zip")
     ap.add_argument("--train-dir", default=None)
     ap.add_argument("--test-dir",  default=None)
     ap.add_argument("--output-dir", default=None,
                     help="Defaults to <repo-root>/output/")
     ap.add_argument("--work-dir", default=None,
                     help="Defaults to <repo-root>/data/processed/")
-    ap.add_argument("--threshold", type=float, default=0.85)
+    ap.add_argument("--threshold", type=float, default=0.85,
+                    help="LightGBM match probability cutoff (default 0.85)")
+    ap.add_argument("--top-k", type=int, default=6,
+                    help="Maximum candidate matches per S1 entity (default 6)")
+    ap.add_argument("--min-sim", type=float, default=0.20,
+                    help="Minimum similarity score threshold for blocking (default 0.20)")
+    ap.add_argument("--max-train-entities", type=int, default=40000,
+                    help="Maximum S1 entities sampled for training (default 40,000)")
     args = ap.parse_args()
 
     # ── Resolve train/test directories ────────────────────────────────────────
@@ -845,11 +870,13 @@ def main() -> None:
             _generate_sample(sample_base)
         train_dir = sample_train
         test_dir  = sample_test
+        max_train = None
     else:
         if not args.train_dir or not args.test_dir:
             ap.error("--mode full requires --train-dir and --test-dir")
         train_dir = os.path.abspath(args.train_dir)
         test_dir  = os.path.abspath(args.test_dir)
+        max_train = args.max_train_entities
 
     for label, p in [("train-dir", train_dir), ("test-dir", test_dir)]:
         if not os.path.isdir(p):
@@ -871,8 +898,17 @@ def main() -> None:
     print(f"[Config] output_dir  = {output_dir}")
     print(f"[Config] work_dir    = {work_dir}")
     print(f"[Config] threshold   = {args.threshold}")
+    print(f"[Config] top_k       = {args.top_k}")
+    print(f"[Config] min_sim     = {args.min_sim}")
 
-    ok = run_pipeline(train_dir, test_dir, output_dir, work_dir, args.threshold)
+    ok = run_pipeline(
+        train_dir, test_dir, output_dir, work_dir,
+        threshold=args.threshold,
+        top_k=args.top_k,
+        min_sim=args.min_sim,
+        max_train_entities=max_train,
+        team_name=args.team_name,
+    )
     sys.exit(0 if ok else 1)
 
 
