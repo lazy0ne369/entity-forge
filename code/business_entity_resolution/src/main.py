@@ -37,9 +37,9 @@ from collections import defaultdict
 from typing import Dict, List, Tuple, Optional, Any, Set
 
 if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
 if hasattr(sys.stderr, "reconfigure"):
-    sys.stderr.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8", line_buffering=True)
 
 # ---------------------------------------------------------------------------
 # Anchor every path to the repository root  (Amazon_ML_Challenge_submission/)
@@ -247,7 +247,7 @@ def _partition_tsv(tsv_file: str, out_base: str, source_name: str, con) -> List[
             coalesce(trim(business_address), '')        as business_address,
             coalesce(trim(country), 'UNKNOWN')          as country
         FROM read_csv('{norm}', delim='\\t', header=True,
-                      quote='"', escape='\\', all_varchar=True, ignore_errors=True);
+                      quote='', escape='', all_varchar=True, ignore_errors=True);
     """)
     raw_countries = [r[0] for r in con.execute(
         f"SELECT DISTINCT country FROM {vn} WHERE country IS NOT NULL"
@@ -267,10 +267,15 @@ def _partition_tsv(tsv_file: str, out_base: str, source_name: str, con) -> List[
 
 
 def _ingest(input_dir: str, proc_dir: str, is_train: bool, tmp_dir: str) -> None:
+    prefix = "train" if is_train else "test"
+    existing = [f for f in ("India", "US") if os.path.exists(os.path.join(proc_dir, f, "source1.parquet"))]
+    if len(existing) >= 2:
+        print(f"\n[Ingestion] Found existing valid {prefix.upper()} parquet cache in {proc_dir} — reusing.")
+        return
+
     import shutil
     shutil.rmtree(proc_dir, ignore_errors=True)
     os.makedirs(proc_dir, exist_ok=True)
-    prefix = "train" if is_train else "test"
     print(f"\n[Ingestion] Partitioning {prefix.upper()} data → {proc_dir}")
     con = _get_duckdb(temp_dir=tmp_dir)
     try:
@@ -287,7 +292,7 @@ def _ingest(input_dir: str, proc_dir: str, is_train: bool, tmp_dir: str) -> None
                     COPY (SELECT trim(source1_entity_id) as source1_entity_id,
                                  coalesce(trim(matched_entity_ids), '') as matched_entity_ids
                           FROM read_csv('{norm_gt}', delim='\\t', header=True,
-                                        all_varchar=True, ignore_errors=True))
+                                        quote='', escape='', all_varchar=True, ignore_errors=True))
                     TO '{dest_gt}' (FORMAT PARQUET, COMPRESSION ZSTD);
                 """)
     finally:
@@ -346,29 +351,38 @@ def _candidates_for_country(
         for tok in set(_block_tokens(txt)):
             inv[tok].append(idx)
 
-    # Prune ultra-frequent tokens (> 15 000 postings)
-    pruned = {t: v for t, v in inv.items() if len(v) <= 15000}
+    # Prune ultra-frequent tokens (> 10 000 postings)
+    pruned = {t: v for t, v in inv.items() if len(v) <= 10000}
     del inv
     gc.collect()
 
     results = []
-    for s1id, q_txt in zip(s1_ids, s1_texts):
+    cutoff_int = int(min_sim * 100)
+    total_q = len(s1_ids)
+
+    for idx, (s1id, q_txt) in enumerate(zip(s1_ids, s1_texts)):
+        if (idx + 1) % 50000 == 0 or idx == total_q - 1:
+            print(f"    [{idx+1:,}/{total_q:,}] candidates queried…", flush=True)
+
+        toks = [t for t in _block_tokens(q_txt) if t in pruned]
+        toks.sort(key=lambda t: len(pruned[t]))
+
         cand_idxs: Set[int] = set()
-        for tok in _block_tokens(q_txt):
-            if tok in pruned:
-                cand_idxs.update(pruned[tok])
-                if len(cand_idxs) > 1000:
-                    break
+        for tok in toks:
+            cand_idxs.update(pruned[tok])
+            if len(cand_idxs) >= 150:
+                break
 
         if not cand_idxs:
             results.append((s1id, []))
             continue
 
+        cand_list = list(cand_idxs)[:150]
         scored = []
-        for d_idx in cand_idxs:
-            sc = fuzz.token_sort_ratio(q_txt, s23_texts[d_idx]) / 100.0
-            if sc >= min_sim:
-                scored.append((s23_ids[d_idx], sc))
+        for d_idx in cand_list:
+            sc = fuzz.token_sort_ratio(q_txt, s23_texts[d_idx], score_cutoff=cutoff_int)
+            if sc > 0:
+                scored.append((s23_ids[d_idx], sc / 100.0))
 
         scored.sort(key=lambda x: x[1], reverse=True)
         results.append((s1id, scored[:top_k]))
@@ -400,6 +414,7 @@ def _run_blocking(
         fout.flush()
 
         for country in countries:
+            print(f"\n  [Blocking] Starting candidate generation for {country}…", flush=True)
             cdir  = os.path.join(proc_dir, country)
             pairs = _candidates_for_country(cdir, top_k=top_k, min_sim=min_sim)
 
@@ -568,7 +583,9 @@ def _predict(
             del df23
             gc.collect()
 
-            for s1id in s1ids:
+            for idx, s1id in enumerate(s1ids):
+                if (idx + 1) % 100000 == 0 or idx == len(s1ids) - 1:
+                    print(f"    [{idx+1:,}/{len(s1ids):,}] predictions scored…", flush=True)
                 total_s1 += 1
                 cands = cand_map.get(s1id, [])
 
@@ -889,7 +906,7 @@ def main() -> None:
     )
     work_dir = (
         os.path.abspath(args.work_dir) if args.work_dir
-        else os.path.join(_ROOT_DIR, "data", "processed")
+        else (os.path.join(sample_base, "processed") if args.mode == "sample" else os.path.join(_ROOT_DIR, "data", "processed"))
     )
 
     print(f"[Config] ROOT        = {_ROOT_DIR}")

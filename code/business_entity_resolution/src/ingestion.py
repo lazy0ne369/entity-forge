@@ -85,8 +85,8 @@ def partition_tsv_by_country(
                 '{norm_tsv_path}',
                 delim='\t',
                 header=True,
-                quote='"',
-                escape='\\',
+                quote='',
+                escape='',
                 all_varchar=True,
                 ignore_errors=True
             );
