@@ -1,5 +1,6 @@
 # Business Entity Resolution Pipeline
-**Amazon ML Challenge 2026**
+**Amazon ML Challenge 2026**  
+**Team Name**: GENZ MINDS  
 
 This directory contains the self-contained, runnable entity resolution pipeline designed to resolve records across disparate data sources ($S_2, S_3$) to canonical reference entities in $S_1$ under the macro-averaged $F_{0.5}$ metric.
 
